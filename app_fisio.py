@@ -4,9 +4,8 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import time
 from datetime import datetime
-import streamlit.components.v1 as components
 
-# --- CONFIGURAÇÕES VISUAIS E CORES DAS ABAS ---
+# --- CONFIGURAÇÕES VISUAIS ---
 st.set_page_config(page_title="Gestão Fisio PRO", page_icon="🩺", layout="centered")
 
 st.markdown("""
@@ -14,7 +13,7 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
-
+    
     /* Botão de Confirmação Verde */
     div.stButton > button:first-child {
         background-color: #28a745;
@@ -28,29 +27,7 @@ st.markdown("""
     button[data-baseweb="tab"]:nth-child(3) { border-bottom: 4px solid #ffc107 !important; color: #ffc107; }
     button[data-baseweb="tab"]:nth-child(4) { border-bottom: 4px solid #6f42c1 !important; color: #6f42c1; }
     button[data-baseweb="tab"]:nth-child(5) { border-bottom: 4px solid #fd7e14 !important; color: #fd7e14; font-weight: bold; }
-    
-    /* Estilo do Card de Captura (PNG) */
-    .screenshot-target {
-        background-color: white;
-        padding: 20px;
-        border-radius: 10px;
-        border: 1px solid #eee;
-        color: black;
-    }
     </style>
-    
-    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
-    <script>
-    function downloadScreenshot(elementId, fileName) {
-        const element = document.getElementById(elementId);
-        html2canvas(element, { scale: 2 }).then(canvas => {
-            const link = document.createElement('a');
-            link.download = fileName;
-            link.href = canvas.toDataURL("image/png");
-            link.click();
-        });
-    }
-    </script>
     """, unsafe_allow_html=True)
 
 # --- FUNÇÕES AUXILIARES ---
@@ -105,7 +82,6 @@ if not st.session_state.logado:
 if 'df' not in st.session_state:
     st.session_state.df = carregar_dados(st.session_state.usuario_atual)
 
-# --- CONFIGURAÇÃO ---
 comissao_fixa = 75 if st.session_state.usuario_atual.lower() == "brenda" else 50
 lista_pacientes = sorted(st.session_state.df["Paciente"].unique().tolist()) if not st.session_state.df.empty else []
 
@@ -133,32 +109,26 @@ for i, sem in enumerate(["Semana 1", "Semana 2", "Semana 3", "Semana 4"]):
 
         df_sem = st.session_state.df[st.session_state.df["Semana"] == sem]
         if not df_sem.empty:
-            # --- ÁREA PARA CAPTURA PNG ---
-            area_id = f"capture_{i}"
+            st.dataframe(df_sem[["Data", "Paciente", "Valor Líquido"]], use_container_width=True, hide_index=True)
             total_sem = df_sem['Valor Líquido'].sum()
+            st.success(f"**Total da {sem}: {formatar_moeda(total_sem)}**")
+
+            # --- BOTÃO DE EXPORTAÇÃO SIMPLIFICADO ---
+            # Como PNG direto falha em muitos celulares, o CSV é o padrão mais seguro.
+            # No entanto, vamos criar um texto formatado para ela apenas copiar e colar no WhatsApp.
             
-            st.markdown(f"""
-            <div id="{area_id}" class="screenshot-target">
-                <h3 style="color: #333; margin-bottom: 5px;">🩺 Resumo {sem}</h3>
-                <p style="color: #666; font-size: 12px;">Profissional: {st.session_state.usuario_atual}</p>
-                <hr>
-                <table style="width:100%; text-align: left; font-size: 14px;">
-                    <tr style="border-bottom: 1px solid #ddd;">
-                        <th>Data</th><th>Paciente</th><th>Valor</th>
-                    </tr>
-                    {"".join([f"<tr><td>{r['Data']}</td><td>{r['Paciente']}</td><td>{formatar_moeda(r['Valor Líquido'])}</td></tr>" for _, r in df_sem.iterrows()])}
-                </table>
-                <hr>
-                <h4 style="text-align: right; color: #28a745;">TOTAL: {formatar_moeda(total_sem)}</h4>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            if st.button(f"📸 Baixar Imagem {sem}", key=f"png_{i}"):
-                components.html(f"""
-                    <script>
-                    window.parent.downloadScreenshot('{area_id}', 'Resumo_{sem.replace(" ", "")}.png');
-                    </script>
-                """, height=0)
+            texto_resumo = f"*🩺 Resumo {sem} - {st.session_state.usuario_atual}*\n\n"
+            for _, r in df_sem.iterrows():
+                texto_resumo += f"✅ {r['Data']} - {r['Paciente']}: {formatar_moeda(r['Valor Líquido'])}\n"
+            texto_resumo += f"\n*TOTAL: {formatar_moeda(total_sem)}*"
+
+            st.download_button(
+                label=f"📥 Baixar Texto para WhatsApp ({sem})",
+                data=texto_resumo,
+                file_name=f"Resumo_{sem.replace(' ', '')}.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
 
             if st.button("Desfazer Último", key=f"del_{i}"):
                 st.session_state.df = st.session_state.df.drop(df_sem.index[-1])
