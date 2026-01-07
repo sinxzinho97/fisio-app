@@ -4,24 +4,16 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import time
 from datetime import datetime
+from PIL import Image, ImageDraw, ImageFont
+import io
 
 # --- CONFIGURAÇÕES VISUAIS ---
 st.set_page_config(page_title="Gestão Fisio PRO", page_icon="🩺", layout="centered")
 
 st.markdown("""
     <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    
-    /* Botão de Confirmação Verde */
-    div.stButton > button:first-child {
-        background-color: #28a745;
-        color: white;
-        border: none;
-    }
-    
-    /* Cores das Abas */
+    #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
+    div.stButton > button:first-child { background-color: #28a745; color: white; border: none; }
     button[data-baseweb="tab"]:nth-child(1) { border-bottom: 4px solid #007bff !important; color: #007bff; }
     button[data-baseweb="tab"]:nth-child(2) { border-bottom: 4px solid #28a745 !important; color: #28a745; }
     button[data-baseweb="tab"]:nth-child(3) { border-bottom: 4px solid #ffc107 !important; color: #ffc107; }
@@ -30,7 +22,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÕES AUXILIARES ---
+# --- FUNÇÕES DE CONEXÃO E DADOS ---
 def formatar_moeda(valor):
     return f"R$ {valor:,.2f}".replace(",", "v").replace(".", ",").replace("v", ".")
 
@@ -63,6 +55,41 @@ def salvar_dados(df, usuario):
         sheet.update([df.columns.values.tolist()] + df.values.tolist())
         return True
     except: return False
+
+# --- FUNÇÃO PARA GERAR IMAGEM JPEG ---
+def gerar_imagem_resumo(df_semana, titulo_semana, usuario):
+    # Cria uma imagem em branco
+    largura = 600
+    altura = 150 + (len(df_semana) * 40)
+    img = Image.new('RGB', (largura, altura), color=(255, 255, 255))
+    d = ImageDraw.Draw(img)
+    
+    # Textos
+    d.text((20, 20), f"🩺 RESUMO {titulo_semana.upper()}", fill=(0, 0, 0))
+    d.text((20, 45), f"Profissional: {usuario} | Data: {datetime.now().strftime('%d/%m/%Y')}", fill=(100, 100, 100))
+    d.line([(20, 70), (580, 70)], fill=(200, 200, 200), width=2)
+    
+    y = 90
+    d.text((20, y), "DATA", fill=(0, 0, 0))
+    d.text((150, y), "PACIENTE", fill=(0, 0, 0))
+    d.text((450, y), "VALOR", fill=(0, 0, 0))
+    
+    y += 30
+    total = 0
+    for _, row in df_semana.iterrows():
+        d.text((20, y), str(row['Data']), fill=(50, 50, 50))
+        d.text((150, y), str(row['Paciente'])[:25], fill=(50, 50, 50))
+        d.text((450, y), formatar_moeda(row['Valor Líquido']), fill=(50, 50, 50))
+        total += row['Valor Líquido']
+        y += 35
+    
+    d.line([(20, y), (580, y)], fill=(200, 200, 200), width=2)
+    d.text((350, y + 20), f"TOTAL: {formatar_moeda(total)}", fill=(40, 167, 69))
+    
+    # Salva em buffer
+    buf = io.BytesIO()
+    img.save(buf, format='JPEG')
+    return buf.getvalue()
 
 # --- LOGIN ---
 if 'logado' not in st.session_state:
@@ -110,23 +137,14 @@ for i, sem in enumerate(["Semana 1", "Semana 2", "Semana 3", "Semana 4"]):
         df_sem = st.session_state.df[st.session_state.df["Semana"] == sem]
         if not df_sem.empty:
             st.dataframe(df_sem[["Data", "Paciente", "Valor Líquido"]], use_container_width=True, hide_index=True)
-            total_sem = df_sem['Valor Líquido'].sum()
-            st.success(f"**Total da {sem}: {formatar_moeda(total_sem)}**")
-
-            # --- BOTÃO DE EXPORTAÇÃO SIMPLIFICADO ---
-            # Como PNG direto falha em muitos celulares, o CSV é o padrão mais seguro.
-            # No entanto, vamos criar um texto formatado para ela apenas copiar e colar no WhatsApp.
             
-            texto_resumo = f"*🩺 Resumo {sem} - {st.session_state.usuario_atual}*\n\n"
-            for _, r in df_sem.iterrows():
-                texto_resumo += f"✅ {r['Data']} - {r['Paciente']}: {formatar_moeda(r['Valor Líquido'])}\n"
-            texto_resumo += f"\n*TOTAL: {formatar_moeda(total_sem)}*"
-
+            # --- BOTÃO DE DOWNLOAD DA IMAGEM JPEG ---
+            img_data = gerar_imagem_resumo(df_sem, sem, st.session_state.usuario_atual)
             st.download_button(
-                label=f"📥 Baixar Texto para WhatsApp ({sem})",
-                data=texto_resumo,
-                file_name=f"Resumo_{sem.replace(' ', '')}.txt",
-                mime="text/plain",
+                label=f"📸 Baixar Imagem {sem}",
+                data=img_data,
+                file_name=f"Resumo_{sem.replace(' ', '')}.jpg",
+                mime="image/jpeg",
                 use_container_width=True
             )
 
