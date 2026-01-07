@@ -16,7 +16,7 @@ hide_streamlit_style = """
             """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
-# --- CONEXÃO GOOGLE SHEETS (USANDO ID) ---
+# --- CONEXÃO GOOGLE SHEETS (USANDO NOME) ---
 def conectar_google_sheets():
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -28,24 +28,23 @@ def conectar_google_sheets():
         st.error(f"Erro de conexão com o Google: {e}")
         return None
 
-def obter_id_planilha(usuario):
-    # Busca o ID configurado nos secrets
+def obter_nome_planilha(usuario):
     try:
         return st.secrets["spreadsheets"][usuario]
     except:
         return None
 
 def carregar_dados(usuario):
-    id_planilha = obter_id_planilha(usuario)
-    if not id_planilha:
-        st.error(f"Erro: Não existe ID de planilha configurado para o usuário '{usuario}'.")
+    nome_planilha = obter_nome_planilha(usuario)
+    if not nome_planilha:
+        st.error(f"Erro: Nenhuma planilha configurada para o utilizador '{usuario}'.")
         return None
 
     client = conectar_google_sheets()
     if client:
         try:
-            # --- TENTA ABRIR PELO ID ---
-            sheet = client.open_by_key(id_planilha).sheet1
+            # VOLTAMOS A USAR .open() para abrir pelo nome
+            sheet = client.open(nome_planilha).sheet1
             
             data = sheet.get_all_records()
             df = pd.DataFrame(data)
@@ -53,29 +52,28 @@ def carregar_dados(usuario):
             if df.empty:
                 return pd.DataFrame(columns=["Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
             
-            # Converte números (garante que não quebre o cálculo)
             cols_num = ["Valor Bruto", "Comissão (%)", "Valor Líquido"]
             for col in cols_num:
                 if col in df.columns:
-                    # A LINHA QUE DEU ERRO ANTES É ESTA ABAIXO:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
             return df
-        except gspread.exceptions.APIError:
-            st.error("Erro de Permissão: O robô não conseguiu acessar a planilha pelo ID.")
-            st.warning("Verifique se o e-mail do robô está adicionado como EDITOR na planilha.")
+        except gspread.exceptions.SpreadsheetNotFound:
+            st.error(f"A planilha '{nome_planilha}' não foi encontrada.")
+            st.info("Verifica se o nome está correto nos Secrets e se a planilha foi partilhada com o e-mail do robô.")
             return None
         except Exception as e:
-            st.error(f"Erro ao abrir planilha (ID incorreto?): {e}")
+            st.error(f"Erro ao abrir planilha: {e}")
             return None
     return None
 
 def salvar_dados(df, usuario):
-    id_planilha = obter_id_planilha(usuario)
+    nome_planilha = obter_nome_planilha(usuario)
     client = conectar_google_sheets()
     if client:
         try:
-            sheet = client.open_by_key(id_planilha).sheet1
+            # VOLTAMOS A USAR .open() aqui também
+            sheet = client.open(nome_planilha).sheet1
             sheet.clear() 
             sheet.update([df.columns.values.tolist()] + df.values.tolist())
             return True
@@ -95,7 +93,7 @@ def verificar_login():
         st.write("---")
         
         with st.form("login_form"):
-            usuario = st.text_input("Usuário:")
+            usuario = st.text_input("Utilizador:")
             senha = st.text_input("Senha:", type="password")
             submit_button = st.form_submit_button("Entrar", use_container_width=True)
 
@@ -109,7 +107,7 @@ def verificar_login():
                         time.sleep(0.5)
                         st.rerun()
                     else:
-                        st.error("Usuário ou senha incorretos.")
+                        st.error("Utilizador ou senha incorretos.")
                 except Exception as e:
                     st.error(f"Erro nos Secrets: {e}")
         return False
@@ -119,16 +117,14 @@ def verificar_login():
 if not verificar_login():
     st.stop()
 
-# Carrega dados
 if 'df' not in st.session_state or st.session_state.df is None:
-    with st.spinner(f'Carregando planilha...'):
+    with st.spinner(f'A abrir a planilha de {st.session_state.usuario_atual}...'):
         dados_nuvem = carregar_dados(st.session_state.usuario_atual)
         if dados_nuvem is not None:
             st.session_state.df = dados_nuvem
         else:
             st.stop() 
 
-# Define comissão padrão
 ultima_comissao = 75
 if not st.session_state.df.empty and "Comissão (%)" in st.session_state.df.columns:
     try:
@@ -139,7 +135,6 @@ if not st.session_state.df.empty and "Comissão (%)" in st.session_state.df.colu
 # --- BARRA LATERAL ---
 with st.sidebar:
     st.info(f"👤 **{st.session_state.usuario_atual}**")
-    
     st.header("⚙️ Configuração")
     comissao_usuario = st.number_input("Sua Comissão (%)", 0, 100, value=ultima_comissao)
     
@@ -157,7 +152,6 @@ st.markdown("<h2 style='text-align: center;'>🩺 Controle Financeiro</h2>", uns
 nomes_semanas = ["Semana 1", "Semana 2", "Semana 3", "Semana 4"]
 abas = st.tabs(nomes_semanas + ["📊 Resumo"])
 
-# Loop Semanas
 for i, semana_nome in enumerate(nomes_semanas):
     with abas[i]:
         st.subheader(f"📝 {semana_nome}")
@@ -168,7 +162,7 @@ for i, semana_nome in enumerate(nomes_semanas):
             
             if st.button(f"Salvar", key=f"b_{i}", use_container_width=True):
                 if paciente and valor > 0:
-                    with st.spinner('Salvando...'):
+                    with st.spinner('A guardar...'):
                         liquido = valor * (comissao_usuario / 100)
                         novo = {
                             "Semana": semana_nome, 
@@ -179,11 +173,11 @@ for i, semana_nome in enumerate(nomes_semanas):
                         }
                         st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([novo])], ignore_index=True)
                         salvar_dados(st.session_state.df, st.session_state.usuario_atual)
-                        st.success("✅ Salvo!")
+                        st.success("✅ Guardado!")
                         time.sleep(0.5)
                         st.rerun()
                 else:
-                    st.warning("Preencha os campos.")
+                    st.warning("Preencha todos os campos.")
 
         df_sem = st.session_state.df[st.session_state.df["Semana"] == semana_nome]
         if not df_sem.empty:
@@ -191,7 +185,7 @@ for i, semana_nome in enumerate(nomes_semanas):
             st.info(f"Total: R$ {df_sem['Valor Líquido'].sum():,.2f}")
             
             if st.button("🗑️ Desfazer Último", key=f"d_{i}"):
-                with st.spinner('Apagando...'):
+                with st.spinner('A eliminar...'):
                     indices = df_sem.index
                     if len(indices) > 0:
                         st.session_state.df = st.session_state.df.drop(indices[-1])
@@ -207,7 +201,7 @@ with abas[4]:
         st.metric("TOTAL MÊS", f"R$ {st.session_state.df['Valor Líquido'].sum():,.2f}")
         
         st.divider()
-        if st.button("🔴 APAGAR MÊS", type="primary", use_container_width=True):
+        if st.button("🔴 APAGAR TUDO (RECOMEÇAR MÊS)", type="primary", use_container_width=True):
             st.session_state.df = pd.DataFrame(columns=["Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
             salvar_dados(st.session_state.df, st.session_state.usuario_atual)
             st.rerun()
