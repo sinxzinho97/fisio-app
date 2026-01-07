@@ -3,7 +3,7 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import time
-from datetime import datetime, time as dt_time
+from datetime import datetime
 from PIL import Image, ImageDraw
 import io
 
@@ -15,7 +15,7 @@ st.markdown("""
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     div.stButton > button:first-child { background-color: #28a745; color: white; border: none; }
     
-    /* Cores das Abas */
+    /* Cores das Abas Semanais */
     button[data-baseweb="tab"]:nth-child(1) { border-bottom: 4px solid #007bff !important; color: #007bff; }
     button[data-baseweb="tab"]:nth-child(2) { border-bottom: 4px solid #28a745 !important; color: #28a745; }
     button[data-baseweb="tab"]:nth-child(3) { border-bottom: 4px solid #ffc107 !important; color: #ffc107; }
@@ -43,12 +43,10 @@ def carregar_dados(usuario):
         sheet = client.open(nome_planilha).sheet1
         df = pd.DataFrame(sheet.get_all_records())
         if df.empty: 
-            return pd.DataFrame(columns=["Data", "Hora", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
-        for col in ["Valor Bruto", "Comissão (%)", "Valor Líquido"]:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            return pd.DataFrame(columns=["Data", "Dia_Semana", "Hora", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
         return df
     except: 
-        return pd.DataFrame(columns=["Data", "Hora", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
+        return pd.DataFrame(columns=["Data", "Dia_Semana", "Hora", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
 
 def salvar_dados(df, usuario):
     nome_planilha = st.secrets["spreadsheets"][usuario]
@@ -60,50 +58,50 @@ def salvar_dados(df, usuario):
         return True
     except: return False
 
-# --- GERAR IMAGEM JPEG ---
 def gerar_imagem_jpeg(df_dados, titulo, usuario, tipo="semanal"):
-    largura = 650
-    altura = 180 + (len(df_dados) * 45)
+    largura = 750
+    altura = 200 + (len(df_dados) * 45)
     img = Image.new('RGB', (largura, altura), color=(255, 255, 255))
     d = ImageDraw.Draw(img)
     
     d.text((20, 20), f"🩺 {titulo.upper()}", fill=(0, 0, 0))
     d.text((20, 45), f"Profissional: {usuario} | Gerado em: {datetime.now().strftime('%d/%m/%Y')}", fill=(100, 100, 100))
-    d.line([(20, 75), (630, 75)], fill=(200, 200, 200), width=2)
+    d.line([(20, 75), (730, 75)], fill=(200, 200, 200), width=2)
     
     y = 100
     if tipo == "semanal":
-        d.text((20, y), "DATA/HORA", fill=(0, 0, 0))
-        d.text((200, y), "PACIENTE", fill=(0, 0, 0))
-        d.text((500, y), "VALOR", fill=(0, 0, 0))
+        d.text((20, y), "DATA", fill=(0, 0, 0))
+        d.text((120, y), "DIA", fill=(0, 0, 0))
+        d.text((230, y), "HORA", fill=(0, 0, 0))
+        d.text((330, y), "PACIENTE", fill=(0, 0, 0))
+        d.text((600, y), "VALOR", fill=(0, 0, 0))
         y += 40
         for _, row in df_dados.iterrows():
-            d.text((20, y), f"{row['Data']} {row.get('Hora', '')}", fill=(50, 50, 50))
-            d.text((200, y), str(row['Paciente'])[:25], fill=(50, 50, 50))
-            d.text((500, y), formatar_moeda(row['Valor Líquido']), fill=(50, 50, 50))
+            d.text((20, y), str(row['Data']), fill=(50, 50, 50))
+            d.text((120, y), str(row.get('Dia_Semana', ''))[:3], fill=(50, 50, 50))
+            d.text((230, y), str(row.get('Hora', '')), fill=(50, 50, 50))
+            d.text((330, y), str(row['Paciente'])[:20], fill=(50, 50, 50))
+            d.text((600, y), formatar_moeda(row['Valor Líquido']), fill=(50, 50, 50))
             y += 35
-        total = df_dados['Valor Líquido'].sum()
     else:
         d.text((20, y), "PERÍODO", fill=(0, 0, 0))
-        d.text((500, y), "VALOR", fill=(0, 0, 0))
+        d.text((600, y), "VALOR", fill=(0, 0, 0))
         y += 40
         for _, row in df_dados.iterrows():
             d.text((20, y), str(row['Semana']), fill=(50, 50, 50))
-            d.text((500, y), formatar_moeda(row['Valor Líquido']), fill=(50, 50, 50))
+            d.text((600, y), formatar_moeda(row['Valor Líquido']), fill=(50, 50, 50))
             y += 35
-        total = df_dados['Valor Líquido'].sum()
-
-    d.line([(20, y+10), (630, y+10)], fill=(200, 200, 200), width=2)
-    d.text((320, y + 30), f"TOTAL A RECEBER: {formatar_moeda(total)}", fill=(40, 167, 69))
     
+    total = df_dados['Valor Líquido'].sum()
+    d.line([(20, y+10), (730, y+10)], fill=(200, 200, 200), width=2)
+    d.text((450, y + 30), f"TOTAL: {formatar_moeda(total)}", fill=(40, 167, 69))
     buf = io.BytesIO()
     img.save(buf, format='JPEG')
     return buf.getvalue()
 
-# --- LOGIN ---
+# --- LOGIN E DADOS ---
 if 'logado' not in st.session_state:
     st.session_state.logado, st.session_state.usuario_atual = False, ""
-
 if not st.session_state.logado:
     st.markdown("<h1 style='text-align: center;'>🔐 Login Fisio</h1>", unsafe_allow_html=True)
     with st.form("login"):
@@ -118,26 +116,16 @@ if not st.session_state.logado:
 if 'df' not in st.session_state:
     st.session_state.df = carregar_dados(st.session_state.usuario_atual)
 
-# --- CONFIGURAÇÕES DE TEMPO ---
-# Cria lista de horários de 06:00 até 21:00 (intervalos de 15 min)
-lista_horarios = []
-for h in range(6, 22):
-    for m in [0, 15, 30, 45]:
-        if h == 21 and m > 0: continue
-        lista_horarios.append(f"{h:02d}:{m:02d}")
-
-# --- LÓGICA DE COMISSÃO ---
+# --- CONFIGURAÇÕES ---
 usuario_logado = st.session_state.usuario_atual.lower()
 comissao_padrao = 75 if usuario_logado == "brenda" else 50
 lista_pacientes = sorted(st.session_state.df["Paciente"].unique().tolist()) if not st.session_state.df.empty else []
+lista_horarios = [f"{h:02d}:{m:02d}" for h in range(6, 22) for m in [0, 15, 30, 45] if not (h == 21 and m > 0)]
+dias_ptbr = {"Monday": "Segunda", "Tuesday": "Terça", "Wednesday": "Quarta", "Thursday": "Quinta", "Friday": "Sexta", "Saturday": "Sábado", "Sunday": "Domingo"}
 
-def get_total_sem(sem_nome):
-    return st.session_state.df[st.session_state.df["Semana"] == sem_nome]["Valor Líquido"].sum()
-
-st.markdown(f"<h3 style='text-align: center;'>🩺 Olá, {st.session_state.usuario_atual}</h3>", unsafe_allow_html=True)
-
+# --- ABAS ---
 nomes_semanas = ["Semana 1", "Semana 2", "Semana 3", "Semana 4"]
-labels = [f"{s} ({formatar_moeda(get_total_sem(s))})" for s in nomes_semanas]
+labels = [f"{s} ({formatar_moeda(st.session_state.df[st.session_state.df['Semana']==s]['Valor Líquido'].sum())})" for s in nomes_semanas]
 abas = st.tabs(labels + ["📊 Resumo Mensal"])
 
 for i, sem in enumerate(nomes_semanas):
@@ -150,54 +138,41 @@ for i, sem in enumerate(nomes_semanas):
             c_sug, c_data, c_hora = st.columns([2, 1, 1])
             paciente_sugerido = c_sug.selectbox("Sugestões", [""] + lista_pacientes, key=f"sel_{i}")
             data_atend = c_data.date_input("Data", value=datetime.now(), key=f"d_{i}")
+            hora_selecionada = c_hora.selectbox("Horário", lista_horarios, index=28, key=f"h_{i}")
             
-            # NOVO: Seletor de Horário Limitado (06:00 - 21:00)
-            hora_selecionada = c_hora.selectbox("Horário", lista_horarios, index=28, key=f"h_{i}") # index 28 aproxima das 13:00 como padrão
+            meio_a_meio = st.checkbox("Meio a Meio (50%)", key=f"check_{i}") if usuario_logado == "brenda" else False
             
-            meio_a_meio = False
-            if usuario_logado == "brenda":
-                meio_a_meio = st.checkbox("Atendimento Meio a Meio (50%)", key=f"check_{i}")
-            
-            nome_f = paciente_sugerido if paciente_sugerido != "" else nome_digitado
             if st.button("Confirmar Atendimento", key=f"btn_{i}", use_container_width=True):
-                if nome_f and valor > 0:
-                    comissao_final = 50 if meio_a_meio else comissao_padrao
-                    liq = valor * (comissao_final / 100)
-                    novo = {
-                        "Data": str(data_atend), 
-                        "Hora": hora_selecionada,
-                        "Semana": sem, 
-                        "Paciente": nome_f, 
-                        "Valor Bruto": valor, 
-                        "Comissão (%)": comissao_final, 
-                        "Valor Líquido": liq
-                    }
+                if (paciente_sugerido or nome_digitado) and valor > 0:
+                    dia_semana = dias_ptbr[data_atend.strftime("%A")]
+                    comissao = 50 if meio_a_meio else comissao_padrao
+                    liq = valor * (comissao / 100)
+                    novo = {"Data": str(data_atend), "Dia_Semana": dia_semana, "Hora": hora_selecionada, "Semana": sem, 
+                            "Paciente": paciente_sugerido if paciente_sugerido else nome_digitado, 
+                            "Valor Bruto": valor, "Comissão (%)": comissao, "Valor Líquido": liq}
                     st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([novo])], ignore_index=True)
                     salvar_dados(st.session_state.df, st.session_state.usuario_atual)
                     st.rerun()
 
+        # Visualização por Dia
         df_sem = st.session_state.df[st.session_state.df["Semana"] == sem]
         if not df_sem.empty:
-            st.dataframe(df_sem[["Data", "Hora", "Paciente", "Valor Líquido"]], use_container_width=True, hide_index=True)
+            st.write("### 📅 Atendimentos da Semana")
+            for dia in ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]:
+                df_dia = df_sem[df_sem["Dia_Semana"] == dia]
+                if not df_dia.empty:
+                    with st.expander(f"📌 {dia} - {formatar_moeda(df_dia['Valor Líquido'].sum())}"):
+                        st.table(df_dia[["Hora", "Paciente", "Valor Líquido"]])
+            
+            st.divider()
             img_sem = gerar_imagem_jpeg(df_sem, f"Resumo {sem}", st.session_state.usuario_atual, "semanal")
-            st.download_button(label=f"📸 Baixar Imagem {sem}", data=img_sem, file_name=f"Resumo_{sem.replace(' ', '')}.jpg", mime="image/jpeg", use_container_width=True)
-
-            if st.button("Desfazer Último", key=f"del_{i}"):
-                st.session_state.df = st.session_state.df.drop(df_sem.index[-1])
-                salvar_dados(st.session_state.df, st.session_state.usuario_atual)
-                st.rerun()
+            st.download_button(f"📸 Baixar Imagem {sem}", img_sem, f"Resumo_{sem}.jpg", "image/jpeg", use_container_width=True)
 
 # --- RESUMO MENSAL ---
 with abas[4]:
     if not st.session_state.df.empty:
-        st.subheader("📊 Consolidado Mensal")
         res = st.session_state.df.groupby("Semana")["Valor Líquido"].sum().reindex(nomes_semanas).fillna(0).reset_index()
-        st.dataframe(res.style.format({"Valor Líquido": lambda x: formatar_moeda(x)}), hide_index=True, use_container_width=True)
+        st.dataframe(res.style.format({"Valor Líquido": lambda x: formatar_moeda(x)}), use_container_width=True, hide_index=True)
         st.metric("TOTAL MÊS", formatar_moeda(st.session_state.df["Valor Líquido"].sum()))
-        img_mes = gerar_imagem_jpeg(res, "Resumo Mensal Consolidado", st.session_state.usuario_atual, "mensal")
-        st.download_button(label="📸 Baixar Imagem Resumo Mensal", data=img_mes, file_name="Resumo_Mensal.jpg", mime="image/jpeg", use_container_width=True)
-        st.divider()
-        if st.button("🔴 APAGAR TUDO (NOVO MÊS)", use_container_width=True, type="primary"):
-            st.session_state.df = pd.DataFrame(columns=["Data", "Hora", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
-            salvar_dados(st.session_state.df, st.session_state.usuario_atual)
-            st.rerun()
+        img_mes = gerar_imagem_jpeg(res, "Resumo Mensal", st.session_state.usuario_atual, "mensal")
+        st.download_button("📸 Baixar Imagem Mensal", img_mes, "Resumo_Mensal.jpg", "image/jpeg", use_container_width=True)
