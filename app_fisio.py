@@ -77,7 +77,6 @@ def arquivar_mes_google(df, usuario):
             spreadsheet = client.open(nome_planilha)
             nome_aba = datetime.now().strftime("%m_%Y_Historico")
             
-            # Cria uma nova aba de histórico
             nova_aba = spreadsheet.add_worksheet(title=nome_aba, rows="100", cols="20")
             nova_aba.update([df.columns.values.tolist()] + df.values.tolist())
             return True
@@ -113,7 +112,7 @@ if not verificar_login():
 if 'df' not in st.session_state:
     st.session_state.df = carregar_dados(st.session_state.usuario_atual)
 
-# --- LOGICA DE AUTOCOMPLETE ---
+# --- LISTA PARA AUTOCOMPLETE ---
 lista_pacientes = sorted(st.session_state.df["Paciente"].unique().tolist()) if not st.session_state.df.empty else []
 
 # --- BARRA LATERAL ---
@@ -132,28 +131,36 @@ abas = st.tabs(nomes_semanas + ["📊 Resumo Mensal"])
 for i, semana_nome in enumerate(nomes_semanas):
     with abas[i]:
         with st.container(border=True):
-            c1, c2, c3 = st.columns([1, 2, 1])
-            data_atend = c1.date_input("Data", key=f"d_{i}")
+            # Layout de entrada de dados
+            c_data, c_valor = st.columns([1, 1])
+            data_atend = c_data.date_input("Data do Atendimento", key=f"d_{i}")
+            valor = c_valor.number_input("Valor da Sessão (R$)", min_value=0.0, step=10.0, key=f"v_{i}")
             
-            # Sugestão Inteligente (Autocomplete)
-            paciente = c2.selectbox("Paciente (Sugestões)", [""] + lista_pacientes + ["-- NOVO --"], key=f"sel_{i}")
-            if paciente == "-- NOVO --" or paciente == "":
-                paciente = c2.text_input("Nome do Paciente", key=f"input_{i}")
+            st.write("---")
+            # NOME ACIMA E SUGESTÃO ABAIXO
+            nome_digitado = st.text_input("Nome do Paciente (Novo)", key=f"input_{i}", placeholder="Digite o nome aqui...")
+            paciente_sugerido = st.selectbox("Ou escolha um paciente das sugestões:", [""] + lista_pacientes, key=f"sel_{i}")
             
-            valor = c3.number_input("Valor R$", min_value=0.0, step=10.0, key=f"v_{i}")
-            
-            if st.button(f"Salvar na {semana_nome}", key=f"b_{i}", use_container_width=True):
-                if paciente and valor > 0:
+            # Lógica para definir qual nome usar
+            nome_final = paciente_sugerido if paciente_sugerido != "" else nome_digitado
+
+            if st.button(f"Confirmar e Salvar na {semana_nome}", key=f"b_{i}", use_container_width=True):
+                if nome_final and valor > 0:
                     liquido = valor * (comissao_usuario / 100)
-                    novo = {"Data": str(data_atend), "Semana": semana_nome, "Paciente": paciente, "Valor Bruto": valor, "Comissão (%)": comissao_usuario, "Valor Líquido": liquido}
+                    novo = {"Data": str(data_atend), "Semana": semana_nome, "Paciente": nome_final, "Valor Bruto": valor, "Comissão (%)": comissao_usuario, "Valor Líquido": liquido}
                     st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([novo])], ignore_index=True)
                     salvar_dados(st.session_state.df, st.session_state.usuario_atual)
+                    st.success(f"Atendimento de {nome_final} salvo!")
+                    time.sleep(1)
                     st.rerun()
+                else:
+                    st.warning("Por favor, preencha o nome do paciente e o valor.")
 
+        # Tabela de visualização da semana
         df_sem = st.session_state.df[st.session_state.df["Semana"] == semana_nome]
         if not df_sem.empty:
             st.dataframe(df_sem[["Data", "Paciente", "Valor Bruto", "Valor Líquido"]], hide_index=True, use_container_width=True)
-            if st.button("Desfazer Último", key=f"del_{i}"):
+            if st.button("Desfazer Último Lançamento", key=f"del_{i}"):
                 st.session_state.df = st.session_state.df.drop(df_sem.index[-1])
                 salvar_dados(st.session_state.df, st.session_state.usuario_atual)
                 st.rerun()
@@ -161,12 +168,12 @@ for i, semana_nome in enumerate(nomes_semanas):
 # --- RESUMO MENSAL ---
 with abas[4]:
     if not st.session_state.df.empty:
-        st.subheader("📊 Consolidado")
+        st.subheader("📊 Consolidado Mensal")
         resumo = st.session_state.df.groupby("Semana")["Valor Líquido"].sum().reindex(nomes_semanas).fillna(0).reset_index()
         st.table(resumo.set_index("Semana"))
         
         total_mês = st.session_state.df["Valor Líquido"].sum()
-        st.metric("TOTAL LÍQUIDO NO MÊS", f"R$ {total_mês:,.2f}")
+        st.metric("TOTAL LÍQUIDO A RECEBER", f"R$ {total_mês:,.2f}")
 
         st.divider()
         col_res1, col_res2 = st.columns(2)
@@ -175,11 +182,11 @@ with abas[4]:
             if arquivar_mes_google(st.session_state.df, st.session_state.usuario_atual):
                 st.session_state.df = pd.DataFrame(columns=["Data", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
                 salvar_dados(st.session_state.df, st.session_state.usuario_atual)
-                st.success("Mês arquivado em uma nova aba e painel limpo!")
+                st.success("Dados movidos para o histórico e painel resetado!")
                 time.sleep(2)
                 st.rerun()
         
-        if col_res2.button("🔴 APAGAR TUDO (SEM SALVAR)", use_container_width=True, type="primary"):
+        if col_res2.button("🔴 APAGAR MÊS ATUAL", use_container_width=True, type="primary"):
             st.session_state.df = pd.DataFrame(columns=["Data", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
             salvar_dados(st.session_state.df, st.session_state.usuario_atual)
             st.rerun()
