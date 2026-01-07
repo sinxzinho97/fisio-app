@@ -165,4 +165,50 @@ for i, semana_nome in enumerate(nomes_semanas):
         with st.container(border=True):
             col1, col2 = st.columns([2, 1])
             paciente = col1.text_input(f"Nome", key=f"n_{i}")
-            valor = col2.number_input(f"Valor R$", min_value=0.0, step=10.0, key
+            valor = col2.number_input(f"Valor R$", min_value=0.0, step=10.0, key=f"v_{i}")
+            
+            if st.button(f"Salvar", key=f"b_{i}", use_container_width=True):
+                if paciente and valor > 0:
+                    with st.spinner('Salvando...'):
+                        liquido = valor * (comissao_usuario / 100)
+                        novo = {
+                            "Semana": semana_nome, 
+                            "Paciente": paciente, 
+                            "Valor Bruto": valor, 
+                            "Comissão (%)": comissao_usuario, 
+                            "Valor Líquido": liquido
+                        }
+                        st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([novo])], ignore_index=True)
+                        salvar_dados(st.session_state.df, st.session_state.usuario_atual)
+                        st.success("✅ Salvo!")
+                        time.sleep(0.5)
+                        st.rerun()
+                else:
+                    st.warning("Preencha os campos.")
+
+        df_sem = st.session_state.df[st.session_state.df["Semana"] == semana_nome]
+        if not df_sem.empty:
+            st.dataframe(df_sem[["Paciente", "Valor Bruto", "Valor Líquido"]], hide_index=True, use_container_width=True)
+            st.info(f"Total: R$ {df_sem['Valor Líquido'].sum():,.2f}")
+            
+            if st.button("🗑️ Desfazer Último", key=f"d_{i}"):
+                with st.spinner('Apagando...'):
+                    indices = df_sem.index
+                    if len(indices) > 0:
+                        st.session_state.df = st.session_state.df.drop(indices[-1])
+                        salvar_dados(st.session_state.df, st.session_state.usuario_atual)
+                        st.rerun()
+
+# Resumo
+with abas[4]:
+    st.header("📊 Fechamento")
+    if not st.session_state.df.empty:
+        resumo = st.session_state.df.groupby("Semana")["Valor Líquido"].sum().reindex(nomes_semanas).fillna(0).reset_index()
+        st.dataframe(resumo.style.format({"Valor Líquido": "R$ {:,.2f}"}), hide_index=True, use_container_width=True)
+        st.metric("TOTAL MÊS", f"R$ {st.session_state.df['Valor Líquido'].sum():,.2f}")
+        
+        st.divider()
+        if st.button("🔴 APAGAR MÊS", type="primary", use_container_width=True):
+            st.session_state.df = pd.DataFrame(columns=["Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
+            salvar_dados(st.session_state.df, st.session_state.usuario_atual)
+            st.rerun()
