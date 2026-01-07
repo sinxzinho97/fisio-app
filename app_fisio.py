@@ -17,6 +17,11 @@ hide_streamlit_style = """
             """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
+# --- FUNÇÃO AUXILIAR DE FORMATAÇÃO DE MOEDA ---
+def formatar_moeda(valor):
+    """Transforma 60.0 em R$ 60,00"""
+    return f"R$ {valor:,.2f}".replace(",", "v").replace(".", ",").replace("v", ".")
+
 # --- CONEXÃO GOOGLE SHEETS ---
 def conectar_google_sheets():
     try:
@@ -134,14 +139,14 @@ for i, semana_nome in enumerate(nomes_semanas):
             # Layout de entrada de dados
             c_data, c_valor = st.columns([1, 1])
             data_atend = c_data.date_input("Data do Atendimento", key=f"d_{i}")
-            valor = c_valor.number_input("Valor da Sessão (R$)", min_value=0.0, step=10.0, key=f"v_{i}")
+            
+            # ALTERAÇÃO: Step ajustado para 5.0 conforme pedido
+            valor = c_valor.number_input("Valor da Sessão (R$)", min_value=0.0, step=5.0, key=f"v_{i}")
             
             st.write("---")
-            # NOME ACIMA E SUGESTÃO ABAIXO
             nome_digitado = st.text_input("Nome do Paciente (Novo)", key=f"input_{i}", placeholder="Digite o nome aqui...")
             paciente_sugerido = st.selectbox("Ou escolha um paciente das sugestões:", [""] + lista_pacientes, key=f"sel_{i}")
             
-            # Lógica para definir qual nome usar
             nome_final = paciente_sugerido if paciente_sugerido != "" else nome_digitado
 
             if st.button(f"Confirmar e Salvar na {semana_nome}", key=f"b_{i}", use_container_width=True):
@@ -156,10 +161,19 @@ for i, semana_nome in enumerate(nomes_semanas):
                 else:
                     st.warning("Por favor, preencha o nome do paciente e o valor.")
 
-        # Tabela de visualização da semana
         df_sem = st.session_state.df[st.session_state.df["Semana"] == semana_nome]
         if not df_sem.empty:
-            st.dataframe(df_sem[["Data", "Paciente", "Valor Bruto", "Valor Líquido"]], hide_index=True, use_container_width=True)
+            # Formatação na tabela da semana
+            df_display = df_sem[["Data", "Paciente", "Valor Bruto", "Valor Líquido"]].copy()
+            st.dataframe(
+                df_display.style.format({"Valor Bruto": "R$ {:,.2f}", "Valor Líquido": "R$ {:,.2f}"}), 
+                hide_index=True, 
+                use_container_width=True
+            )
+            
+            total_sem = df_sem['Valor Líquido'].sum()
+            st.info(f"💰 **Total a receber na semana:** {formatar_moeda(total_sem)}")
+            
             if st.button("Desfazer Último Lançamento", key=f"del_{i}"):
                 st.session_state.df = st.session_state.df.drop(df_sem.index[-1])
                 salvar_dados(st.session_state.df, st.session_state.usuario_atual)
@@ -170,10 +184,17 @@ with abas[4]:
     if not st.session_state.df.empty:
         st.subheader("📊 Consolidado Mensal")
         resumo = st.session_state.df.groupby("Semana")["Valor Líquido"].sum().reindex(nomes_semanas).fillna(0).reset_index()
-        st.table(resumo.set_index("Semana"))
+        
+        # ALTERAÇÃO: Tabela formatada em Reais (R$ 0,00)
+        st.dataframe(
+            resumo.style.format({"Valor Líquido": lambda x: formatar_moeda(x)}),
+            hide_index=True,
+            use_container_width=True
+        )
         
         total_mês = st.session_state.df["Valor Líquido"].sum()
-        st.metric("TOTAL LÍQUIDO A RECEBER", f"R$ {total_mês:,.2f}")
+        # Metric formatada em Reais
+        st.metric("TOTAL LÍQUIDO A RECEBER", formatar_moeda(total_mês))
 
         st.divider()
         col_res1, col_res2 = st.columns(2)
