@@ -5,24 +5,35 @@ from oauth2client.service_account import ServiceAccountCredentials
 import time
 from datetime import datetime
 
-# --- CONFIGURAÇÕES VISUAIS ---
+# --- CONFIGURAÇÕES VISUAIS E CORES DAS ABAS ---
 st.set_page_config(page_title="Gestão Fisio PRO", page_icon="🩺", layout="centered")
 
-# CSS para customizar o botão de confirmação para Verde
 st.markdown("""
     <style>
+    /* Estilo para esconder menus padrão */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* Botão de Confirmação Verde */
     div.stButton > button:first-child {
         background-color: #28a745;
         color: white;
         border: none;
     }
-    div.stButton > button:first-child:hover {
-        background-color: #218838;
-        color: white;
+    
+    /* Cores Personalizadas para as Abas */
+    button[data-baseweb="tab"]:nth-child(1) { border-bottom: 4px solid #007bff !important; color: #007bff; } /* Azul */
+    button[data-baseweb="tab"]:nth-child(2) { border-bottom: 4px solid #28a745 !important; color: #28a745; } /* Verde */
+    button[data-baseweb="tab"]:nth-child(3) { border-bottom: 4px solid #ffc107 !important; color: #ffc107; } /* Amarelo */
+    button[data-baseweb="tab"]:nth-child(4) { border-bottom: 4px solid #6f42c1 !important; color: #6f42c1; } /* Roxo */
+    button[data-baseweb="tab"]:nth-child(5) { border-bottom: 4px solid #fd7e14 !important; color: #fd7e14; font-weight: bold; } /* Laranja */
+    
+    /* Destaque quando a aba está selecionada */
+    button[aria-selected="true"] {
+        background-color: rgba(0,0,0,0.05);
+        border-radius: 5px 5px 0 0;
     }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
     </style>
     """, unsafe_allow_html=True)
 
@@ -134,6 +145,7 @@ with st.sidebar:
 
 st.markdown("<h2 style='text-align: center;'>🩺 Gestão de Atendimentos</h2>", unsafe_allow_html=True)
 
+# Criação das Abas
 nomes_semanas = ["Semana 1", "Semana 2", "Semana 3", "Semana 4"]
 abas = st.tabs(nomes_semanas + ["📊 Resumo Mensal"])
 
@@ -158,7 +170,7 @@ for i, semana_nome in enumerate(nomes_semanas):
                     novo = {"Data": str(data_atend), "Semana": semana_nome, "Paciente": nome_final, "Valor Bruto": valor, "Comissão (%)": comissao_fixa, "Valor Líquido": liquido}
                     st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([novo])], ignore_index=True)
                     salvar_dados(st.session_state.df, st.session_state.usuario_atual)
-                    st.success(f"Atendimento de {nome_final} confirmado!")
+                    st.success(f"Atendimento confirmado!")
                     time.sleep(0.5)
                     st.rerun()
                 else:
@@ -174,13 +186,17 @@ for i, semana_nome in enumerate(nomes_semanas):
                 salvar_dados(st.session_state.df, st.session_state.usuario_atual)
                 st.rerun()
 
-# --- RESUMO MENSAL ---
+# --- RESUMO MENSAL (Aba Laranja) ---
 with abas[4]:
     if not st.session_state.df.empty:
         st.subheader("📊 Consolidado Mensal")
         resumo = st.session_state.df.groupby("Semana")["Valor Líquido"].sum().reindex(nomes_semanas).fillna(0).reset_index()
         st.dataframe(resumo.style.format({"Valor Líquido": lambda x: formatar_moeda(x)}), hide_index=True, use_container_width=True)
-        st.metric("TOTAL LÍQUIDO A RECEBER", formatar_moeda(st.session_state.df["Valor Líquido"].sum()))
+        
+        st.write("---")
+        total_mês = st.session_state.df["Valor Líquido"].sum()
+        st.metric("TOTAL LÍQUIDO A RECEBER", formatar_moeda(total_mês))
+        
         st.divider()
         c1, c2 = st.columns(2)
         if c1.button("📦 ARQUIVAR MÊS", use_container_width=True):
@@ -192,3 +208,5 @@ with abas[4]:
             st.session_state.df = pd.DataFrame(columns=["Data", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
             salvar_dados(st.session_state.df, st.session_state.usuario_atual)
             st.rerun()
+    else:
+        st.info("Nenhum atendimento registrado este mês.")
