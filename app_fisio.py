@@ -4,13 +4,13 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import time
 from datetime import datetime
+import streamlit.components.v1 as components
 
 # --- CONFIGURAÇÕES VISUAIS E CORES DAS ABAS ---
 st.set_page_config(page_title="Gestão Fisio PRO", page_icon="🩺", layout="centered")
 
 st.markdown("""
     <style>
-    /* Estilo para esconder menus padrão */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -22,19 +22,35 @@ st.markdown("""
         border: none;
     }
     
-    /* Cores Personalizadas para as Abas */
-    button[data-baseweb="tab"]:nth-child(1) { border-bottom: 4px solid #007bff !important; color: #007bff; } /* Azul */
-    button[data-baseweb="tab"]:nth-child(2) { border-bottom: 4px solid #28a745 !important; color: #28a745; } /* Verde */
-    button[data-baseweb="tab"]:nth-child(3) { border-bottom: 4px solid #ffc107 !important; color: #ffc107; } /* Amarelo */
-    button[data-baseweb="tab"]:nth-child(4) { border-bottom: 4px solid #6f42c1 !important; color: #6f42c1; } /* Roxo */
-    button[data-baseweb="tab"]:nth-child(5) { border-bottom: 4px solid #fd7e14 !important; color: #fd7e14; font-weight: bold; } /* Laranja */
+    /* Cores das Abas */
+    button[data-baseweb="tab"]:nth-child(1) { border-bottom: 4px solid #007bff !important; color: #007bff; }
+    button[data-baseweb="tab"]:nth-child(2) { border-bottom: 4px solid #28a745 !important; color: #28a745; }
+    button[data-baseweb="tab"]:nth-child(3) { border-bottom: 4px solid #ffc107 !important; color: #ffc107; }
+    button[data-baseweb="tab"]:nth-child(4) { border-bottom: 4px solid #6f42c1 !important; color: #6f42c1; }
+    button[data-baseweb="tab"]:nth-child(5) { border-bottom: 4px solid #fd7e14 !important; color: #fd7e14; font-weight: bold; }
     
-    /* Destaque quando a aba está selecionada */
-    button[aria-selected="true"] {
-        background-color: rgba(0,0,0,0.05);
-        border-radius: 5px 5px 0 0;
+    /* Estilo do Card de Captura (PNG) */
+    .screenshot-target {
+        background-color: white;
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #eee;
+        color: black;
     }
     </style>
+    
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <script>
+    function downloadScreenshot(elementId, fileName) {
+        const element = document.getElementById(elementId);
+        html2canvas(element, { scale: 2 }).then(canvas => {
+            const link = document.createElement('a');
+            link.download = fileName;
+            link.href = canvas.toDataURL("image/png");
+            link.click();
+        });
+    }
+    </script>
     """, unsafe_allow_html=True)
 
 # --- FUNÇÕES AUXILIARES ---
@@ -46,167 +62,118 @@ def conectar_google_sheets():
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds_dict = dict(st.secrets["gcp_service_account"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
-        return client
-    except Exception as e:
-        st.error(f"Erro de conexão: {e}")
-        return None
-
-def obter_nome_planilha(usuario):
-    try: return st.secrets["spreadsheets"][usuario]
+        return gspread.authorize(creds)
     except: return None
 
 def carregar_dados(usuario):
-    nome_planilha = obter_nome_planilha(usuario)
+    nome_planilha = st.secrets["spreadsheets"][usuario]
     client = conectar_google_sheets()
-    if client:
-        try:
-            sheet = client.open(nome_planilha).sheet1
-            data = sheet.get_all_records()
-            df = pd.DataFrame(data)
-            if df.empty:
-                return pd.DataFrame(columns=["Data", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
-            cols_num = ["Valor Bruto", "Comissão (%)", "Valor Líquido"]
-            for col in cols_num:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            return df
-        except:
-            return pd.DataFrame(columns=["Data", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
-    return None
+    try:
+        sheet = client.open(nome_planilha).sheet1
+        df = pd.DataFrame(sheet.get_all_records())
+        if df.empty: return pd.DataFrame(columns=["Data", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
+        for col in ["Valor Bruto", "Comissão (%)", "Valor Líquido"]:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        return df
+    except: return pd.DataFrame(columns=["Data", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
 
 def salvar_dados(df, usuario):
-    nome_planilha = obter_nome_planilha(usuario)
+    nome_planilha = st.secrets["spreadsheets"][usuario]
     client = conectar_google_sheets()
-    if client:
-        try:
-            sheet = client.open(nome_planilha).sheet1
-            sheet.clear() 
-            sheet.update([df.columns.values.tolist()] + df.values.tolist())
-            return True
-        except Exception as e:
-            st.error(f"Erro ao salvar: {e}")
-            return False
-    return False
-
-def arquivar_mes_google(df, usuario):
-    nome_planilha = obter_nome_planilha(usuario)
-    client = conectar_google_sheets()
-    if client:
-        try:
-            spreadsheet = client.open(nome_planilha)
-            nome_aba = datetime.now().strftime("%m_%Y_Historico")
-            nova_aba = spreadsheet.add_worksheet(title=nome_aba, rows="100", cols="20")
-            nova_aba.update([df.columns.values.tolist()] + df.values.tolist())
-            return True
-        except Exception as e:
-            st.error(f"Erro ao arquivar: {e}")
-            return False
+    try:
+        sheet = client.open(nome_planilha).sheet1
+        sheet.clear() 
+        sheet.update([df.columns.values.tolist()] + df.values.tolist())
+        return True
+    except: return False
 
 # --- LOGIN ---
-def verificar_login():
-    if 'logado' not in st.session_state:
-        st.session_state.logado = False
-        st.session_state.usuario_atual = ""
-    if not st.session_state.logado:
-        st.markdown("<h1 style='text-align: center;'>🔐 Login Fisio</h1>", unsafe_allow_html=True)
-        with st.form("login_form"):
-            usuario = st.text_input("Usuário:")
-            senha = st.text_input("Senha:", type="password")
-            if st.form_submit_button("Entrar", use_container_width=True):
-                senhas = st.secrets["passwords"]
-                if usuario in senhas and senhas[usuario] == senha:
-                    st.session_state.logado = True
-                    st.session_state.usuario_atual = usuario
-                    st.rerun()
-                else:
-                    st.error("Dados incorretos.")
-        return False
-    return True
+if 'logado' not in st.session_state:
+    st.session_state.logado, st.session_state.usuario_atual = False, ""
 
-if not verificar_login():
+if not st.session_state.logado:
+    st.markdown("<h1 style='text-align: center;'>🔐 Login Fisio</h1>", unsafe_allow_html=True)
+    with st.form("login"):
+        u = st.text_input("Usuário:")
+        s = st.text_input("Senha:", type="password")
+        if st.form_submit_button("Entrar", use_container_width=True):
+            if u in st.secrets["passwords"] and st.secrets["passwords"][u] == s:
+                st.session_state.logado, st.session_state.usuario_atual = True, u
+                st.rerun()
     st.stop()
 
 if 'df' not in st.session_state:
     st.session_state.df = carregar_dados(st.session_state.usuario_atual)
 
-# --- CONFIGURAÇÃO DE COMISSÃO ---
-usuario_logado = st.session_state.usuario_atual.lower()
-comissao_fixa = 75 if usuario_logado == "brenda" else 50
+# --- CONFIGURAÇÃO ---
+comissao_fixa = 75 if st.session_state.usuario_atual.lower() == "brenda" else 50
 lista_pacientes = sorted(st.session_state.df["Paciente"].unique().tolist()) if not st.session_state.df.empty else []
 
-# --- BARRA LATERAL ---
-with st.sidebar:
-    st.info(f"👤 **{st.session_state.usuario_atual}**")
-    st.number_input("Sua Comissão (%)", value=comissao_fixa, disabled=True)
-    if st.button("Sair"):
-        st.session_state.logado = False
-        st.rerun()
+st.markdown(f"<h3 style='text-align: center;'>🩺 Olá, {st.session_state.usuario_atual}</h3>", unsafe_allow_html=True)
 
-st.markdown("<h2 style='text-align: center;'>🩺 Gestão de Atendimentos</h2>", unsafe_allow_html=True)
+abas = st.tabs(["Semana 1", "Semana 2", "Semana 3", "Semana 4", "📊 Resumo"])
 
-# Criação das Abas
-nomes_semanas = ["Semana 1", "Semana 2", "Semana 3", "Semana 4"]
-abas = st.tabs(nomes_semanas + ["📊 Resumo Mensal"])
-
-for i, semana_nome in enumerate(nomes_semanas):
+for i, sem in enumerate(["Semana 1", "Semana 2", "Semana 3", "Semana 4"]):
     with abas[i]:
         with st.container(border=True):
-            # 1. NOME E VALOR (PRIORIDADE)
-            c_nome, c_valor = st.columns([2, 1])
-            nome_digitado = c_nome.text_input("Nome do Paciente", key=f"input_{i}", placeholder="Digite o nome...")
-            valor = c_valor.number_input("Valor R$", min_value=0.0, step=5.0, key=f"v_{i}")
+            c1, c2 = st.columns([2, 1])
+            nome_digitado = c1.text_input("Paciente", key=f"in_{i}")
+            valor = c2.number_input("Valor R$", step=5.0, key=f"v_{i}")
+            paciente_sugerido = st.selectbox("Sugestões", [""] + lista_pacientes, key=f"sel_{i}")
+            data_atend = st.date_input("Data", value=datetime.now(), key=f"d_{i}")
             
-            # 2. SUGESTÃO E DATA (AUXILIARES)
-            c_sug, c_data = st.columns([2, 1])
-            paciente_sugerido = c_sug.selectbox("Sugestões (Opcional)", [""] + lista_pacientes, key=f"sel_{i}")
-            data_atend = c_data.date_input("Data", value=datetime.now(), key=f"d_{i}")
-            
-            nome_final = paciente_sugerido if paciente_sugerido != "" else nome_digitado
-
+            nome_f = paciente_sugerido if paciente_sugerido != "" else nome_digitado
             if st.button("Confirmar Atendimento", key=f"btn_{i}", use_container_width=True):
-                if nome_final and valor > 0:
-                    liquido = valor * (comissao_fixa / 100)
-                    novo = {"Data": str(data_atend), "Semana": semana_nome, "Paciente": nome_final, "Valor Bruto": valor, "Comissão (%)": comissao_fixa, "Valor Líquido": liquido}
+                if nome_f and valor > 0:
+                    liq = valor * (comissao_fixa / 100)
+                    novo = {"Data": str(data_atend), "Semana": sem, "Paciente": nome_f, "Valor Bruto": valor, "Comissão (%)": comissao_fixa, "Valor Líquido": liq}
                     st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([novo])], ignore_index=True)
                     salvar_dados(st.session_state.df, st.session_state.usuario_atual)
-                    st.success(f"Atendimento confirmado!")
-                    time.sleep(0.5)
                     st.rerun()
-                else:
-                    st.warning("Preencha o nome e o valor.")
 
-        df_sem = st.session_state.df[st.session_state.df["Semana"] == semana_nome]
+        df_sem = st.session_state.df[st.session_state.df["Semana"] == sem]
         if not df_sem.empty:
-            df_display = df_sem[["Data", "Paciente", "Valor Bruto", "Valor Líquido"]].copy()
-            st.dataframe(df_display.style.format({"Valor Bruto": "R$ {:,.2f}", "Valor Líquido": "R$ {:,.2f}"}), hide_index=True, use_container_width=True)
-            st.info(f"💰 **Total na semana:** {formatar_moeda(df_sem['Valor Líquido'].sum())}")
+            # --- ÁREA PARA CAPTURA PNG ---
+            area_id = f"capture_{i}"
+            total_sem = df_sem['Valor Líquido'].sum()
+            
+            st.markdown(f"""
+            <div id="{area_id}" class="screenshot-target">
+                <h3 style="color: #333; margin-bottom: 5px;">🩺 Resumo {sem}</h3>
+                <p style="color: #666; font-size: 12px;">Profissional: {st.session_state.usuario_atual}</p>
+                <hr>
+                <table style="width:100%; text-align: left; font-size: 14px;">
+                    <tr style="border-bottom: 1px solid #ddd;">
+                        <th>Data</th><th>Paciente</th><th>Valor</th>
+                    </tr>
+                    {"".join([f"<tr><td>{r['Data']}</td><td>{r['Paciente']}</td><td>{formatar_moeda(r['Valor Líquido'])}</td></tr>" for _, r in df_sem.iterrows()])}
+                </table>
+                <hr>
+                <h4 style="text-align: right; color: #28a745;">TOTAL: {formatar_moeda(total_sem)}</h4>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button(f"📸 Baixar Imagem {sem}", key=f"png_{i}"):
+                components.html(f"""
+                    <script>
+                    window.parent.downloadScreenshot('{area_id}', 'Resumo_{sem.replace(" ", "")}.png');
+                    </script>
+                """, height=0)
+
             if st.button("Desfazer Último", key=f"del_{i}"):
                 st.session_state.df = st.session_state.df.drop(df_sem.index[-1])
                 salvar_dados(st.session_state.df, st.session_state.usuario_atual)
                 st.rerun()
 
-# --- RESUMO MENSAL (Aba Laranja) ---
+# --- RESUMO MENSAL ---
 with abas[4]:
     if not st.session_state.df.empty:
-        st.subheader("📊 Consolidado Mensal")
-        resumo = st.session_state.df.groupby("Semana")["Valor Líquido"].sum().reindex(nomes_semanas).fillna(0).reset_index()
-        st.dataframe(resumo.style.format({"Valor Líquido": lambda x: formatar_moeda(x)}), hide_index=True, use_container_width=True)
+        st.subheader("📊 Fechamento Mensal")
+        res = st.session_state.df.groupby("Semana")["Valor Líquido"].sum().reindex(["Semana 1", "Semana 2", "Semana 3", "Semana 4"]).fillna(0).reset_index()
+        st.dataframe(res.style.format({"Valor Líquido": lambda x: formatar_moeda(x)}), hide_index=True, use_container_width=True)
+        st.metric("TOTAL MÊS", formatar_moeda(st.session_state.df["Valor Líquido"].sum()))
         
-        st.write("---")
-        total_mês = st.session_state.df["Valor Líquido"].sum()
-        st.metric("TOTAL LÍQUIDO A RECEBER", formatar_moeda(total_mês))
-        
-        st.divider()
-        c1, c2 = st.columns(2)
-        if c1.button("📦 ARQUIVAR MÊS", use_container_width=True):
-            if arquivar_mes_google(st.session_state.df, st.session_state.usuario_atual):
-                st.session_state.df = pd.DataFrame(columns=["Data", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
-                salvar_dados(st.session_state.df, st.session_state.usuario_atual)
-                st.rerun()
-        if c2.button("🔴 APAGAR MÊS", use_container_width=True, type="primary"):
+        if st.button("🔴 APAGAR MÊS", use_container_width=True, type="primary"):
             st.session_state.df = pd.DataFrame(columns=["Data", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
             salvar_dados(st.session_state.df, st.session_state.usuario_atual)
             st.rerun()
-    else:
-        st.info("Nenhum atendimento registrado este mês.")
