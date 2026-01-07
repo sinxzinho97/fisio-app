@@ -14,6 +14,8 @@ st.markdown("""
     <style>
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     div.stButton > button:first-child { background-color: #28a745; color: white; border: none; }
+    
+    /* Cores das Abas */
     button[data-baseweb="tab"]:nth-child(1) { border-bottom: 4px solid #007bff !important; color: #007bff; }
     button[data-baseweb="tab"]:nth-child(2) { border-bottom: 4px solid #28a745 !important; color: #28a745; }
     button[data-baseweb="tab"]:nth-child(3) { border-bottom: 4px solid #ffc107 !important; color: #ffc107; }
@@ -22,7 +24,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÕES DE CONEXÃO E DADOS ---
+# --- FUNÇÕES AUXILIARES ---
 def formatar_moeda(valor):
     return f"R$ {valor:,.2f}".replace(",", "v").replace(".", ",").replace("v", ".")
 
@@ -57,36 +59,41 @@ def salvar_dados(df, usuario):
     except: return False
 
 # --- FUNÇÃO PARA GERAR IMAGEM JPEG ---
-def gerar_imagem_resumo(df_semana, titulo_semana, usuario):
-    # Cria uma imagem em branco
+def gerar_imagem_jpeg(df_dados, titulo, usuario, tipo="semanal"):
     largura = 600
-    altura = 150 + (len(df_semana) * 40)
+    altura = 180 + (len(df_dados) * 45)
     img = Image.new('RGB', (largura, altura), color=(255, 255, 255))
     d = ImageDraw.Draw(img)
     
-    # Textos
-    d.text((20, 20), f"🩺 RESUMO {titulo_semana.upper()}", fill=(0, 0, 0))
-    d.text((20, 45), f"Profissional: {usuario} | Data: {datetime.now().strftime('%d/%m/%Y')}", fill=(100, 100, 100))
-    d.line([(20, 70), (580, 70)], fill=(200, 200, 200), width=2)
+    d.text((20, 20), f"🩺 {titulo.upper()}", fill=(0, 0, 0))
+    d.text((20, 45), f"Profissional: {usuario} | Gerado em: {datetime.now().strftime('%d/%m/%Y')}", fill=(100, 100, 100))
+    d.line([(20, 75), (580, 75)], fill=(200, 200, 200), width=2)
     
-    y = 90
-    d.text((20, y), "DATA", fill=(0, 0, 0))
-    d.text((150, y), "PACIENTE", fill=(0, 0, 0))
-    d.text((450, y), "VALOR", fill=(0, 0, 0))
+    y = 100
+    if tipo == "semanal":
+        d.text((20, y), "DATA", fill=(0, 0, 0))
+        d.text((150, y), "PACIENTE", fill=(0, 0, 0))
+        d.text((450, y), "VALOR", fill=(0, 0, 0))
+        y += 40
+        for _, row in df_dados.iterrows():
+            d.text((20, y), str(row['Data']), fill=(50, 50, 50))
+            d.text((150, y), str(row['Paciente'])[:25], fill=(50, 50, 50))
+            d.text((450, y), formatar_moeda(row['Valor Líquido']), fill=(50, 50, 50))
+            y += 35
+        total = df_dados['Valor Líquido'].sum()
+    else: # Mensal
+        d.text((20, y), "PERÍODO", fill=(0, 0, 0))
+        d.text((450, y), "VALOR", fill=(0, 0, 0))
+        y += 40
+        for _, row in df_dados.iterrows():
+            d.text((20, y), str(row['Semana']), fill=(50, 50, 50))
+            d.text((450, y), formatar_moeda(row['Valor Líquido']), fill=(50, 50, 50))
+            y += 35
+        total = df_dados['Valor Líquido'].sum()
+
+    d.line([(20, y+10), (580, y+10)], fill=(200, 200, 200), width=2)
+    d.text((320, y + 30), f"TOTAL A RECEBER: {formatar_moeda(total)}", fill=(40, 167, 69))
     
-    y += 30
-    total = 0
-    for _, row in df_semana.iterrows():
-        d.text((20, y), str(row['Data']), fill=(50, 50, 50))
-        d.text((150, y), str(row['Paciente'])[:25], fill=(50, 50, 50))
-        d.text((450, y), formatar_moeda(row['Valor Líquido']), fill=(50, 50, 50))
-        total += row['Valor Líquido']
-        y += 35
-    
-    d.line([(20, y), (580, y)], fill=(200, 200, 200), width=2)
-    d.text((350, y + 20), f"TOTAL: {formatar_moeda(total)}", fill=(40, 167, 69))
-    
-    # Salva em buffer
     buf = io.BytesIO()
     img.save(buf, format='JPEG')
     return buf.getvalue()
@@ -109,14 +116,26 @@ if not st.session_state.logado:
 if 'df' not in st.session_state:
     st.session_state.df = carregar_dados(st.session_state.usuario_atual)
 
+# --- LÓGICA DE VALORES ---
 comissao_fixa = 75 if st.session_state.usuario_atual.lower() == "brenda" else 50
 lista_pacientes = sorted(st.session_state.df["Paciente"].unique().tolist()) if not st.session_state.df.empty else []
 
+# Cálculo de totais para os títulos das abas
+def get_total_sem(sem_nome):
+    return st.session_state.df[st.session_state.df["Semana"] == sem_nome]["Valor Líquido"].sum()
+
+label_s1 = f"Semana 1 ({formatar_moeda(get_total_sem('Semana 1'))})"
+label_s2 = f"Semana 2 ({formatar_moeda(get_total_sem('Semana 2'))})"
+label_s3 = f"Semana 3 ({formatar_moeda(get_total_sem('Semana 3'))})"
+label_s4 = f"Semana 4 ({formatar_moeda(get_total_sem('Semana 4'))})"
+
 st.markdown(f"<h3 style='text-align: center;'>🩺 Olá, {st.session_state.usuario_atual}</h3>", unsafe_allow_html=True)
 
-abas = st.tabs(["Semana 1", "Semana 2", "Semana 3", "Semana 4", "📊 Resumo"])
+abas = st.tabs([label_s1, label_s2, label_s3, label_s4, "📊 Resumo Mensal"])
 
-for i, sem in enumerate(["Semana 1", "Semana 2", "Semana 3", "Semana 4"]):
+nomes_semanas = ["Semana 1", "Semana 2", "Semana 3", "Semana 4"]
+
+for i, sem in enumerate(nomes_semanas):
     with abas[i]:
         with st.container(border=True):
             c1, c2 = st.columns([2, 1])
@@ -138,15 +157,9 @@ for i, sem in enumerate(["Semana 1", "Semana 2", "Semana 3", "Semana 4"]):
         if not df_sem.empty:
             st.dataframe(df_sem[["Data", "Paciente", "Valor Líquido"]], use_container_width=True, hide_index=True)
             
-            # --- BOTÃO DE DOWNLOAD DA IMAGEM JPEG ---
-            img_data = gerar_imagem_resumo(df_sem, sem, st.session_state.usuario_atual)
-            st.download_button(
-                label=f"📸 Baixar Imagem {sem}",
-                data=img_data,
-                file_name=f"Resumo_{sem.replace(' ', '')}.jpg",
-                mime="image/jpeg",
-                use_container_width=True
-            )
+            # Botão Imagem Semanal
+            img_sem = gerar_imagem_jpeg(df_sem, f"Resumo {sem}", st.session_state.usuario_atual, "semanal")
+            st.download_button(label=f"📸 Baixar Imagem {sem}", data=img_sem, file_name=f"Resumo_{sem.replace(' ', '')}.jpg", mime="image/jpeg", use_container_width=True)
 
             if st.button("Desfazer Último", key=f"del_{i}"):
                 st.session_state.df = st.session_state.df.drop(df_sem.index[-1])
@@ -156,12 +169,21 @@ for i, sem in enumerate(["Semana 1", "Semana 2", "Semana 3", "Semana 4"]):
 # --- RESUMO MENSAL ---
 with abas[4]:
     if not st.session_state.df.empty:
-        st.subheader("📊 Fechamento Mensal")
-        res = st.session_state.df.groupby("Semana")["Valor Líquido"].sum().reindex(["Semana 1", "Semana 2", "Semana 3", "Semana 4"]).fillna(0).reset_index()
+        st.subheader("📊 Consolidado Mensal")
+        res = st.session_state.df.groupby("Semana")["Valor Líquido"].sum().reindex(nomes_semanas).fillna(0).reset_index()
         st.dataframe(res.style.format({"Valor Líquido": lambda x: formatar_moeda(x)}), hide_index=True, use_container_width=True)
-        st.metric("TOTAL MÊS", formatar_moeda(st.session_state.df["Valor Líquido"].sum()))
         
-        if st.button("🔴 APAGAR MÊS", use_container_width=True, type="primary"):
+        total_geral = st.session_state.df["Valor Líquido"].sum()
+        st.metric("TOTAL MÊS", formatar_moeda(total_geral))
+        
+        # Botão Imagem Mensal
+        img_mes = gerar_imagem_jpeg(res, "Resumo Mensal Consolidado", st.session_state.usuario_atual, "mensal")
+        st.download_button(label="📸 Baixar Imagem Resumo Mensal", data=img_mes, file_name="Resumo_Mensal.jpg", mime="image/jpeg", use_container_width=True)
+        
+        st.divider()
+        if st.button("🔴 APAGAR TUDO (NOVO MÊS)", use_container_width=True, type="primary"):
             st.session_state.df = pd.DataFrame(columns=["Data", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
             salvar_dados(st.session_state.df, st.session_state.usuario_atual)
             st.rerun()
+    else:
+        st.info("Nenhum atendimento este mês.")
