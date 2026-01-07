@@ -3,7 +3,7 @@ import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import time
-from datetime import datetime
+from datetime import datetime, time as dt_time
 from PIL import Image, ImageDraw
 import io
 
@@ -74,22 +74,22 @@ def gerar_imagem_jpeg(df_dados, titulo, usuario, tipo="semanal"):
     y = 100
     if tipo == "semanal":
         d.text((20, y), "DATA/HORA", fill=(0, 0, 0))
-        d.text((180, y), "PACIENTE", fill=(0, 0, 0))
-        d.text((480, y), "VALOR", fill=(0, 0, 0))
+        d.text((200, y), "PACIENTE", fill=(0, 0, 0))
+        d.text((500, y), "VALOR", fill=(0, 0, 0))
         y += 40
         for _, row in df_dados.iterrows():
             d.text((20, y), f"{row['Data']} {row.get('Hora', '')}", fill=(50, 50, 50))
-            d.text((180, y), str(row['Paciente'])[:25], fill=(50, 50, 50))
-            d.text((480, y), formatar_moeda(row['Valor Líquido']), fill=(50, 50, 50))
+            d.text((200, y), str(row['Paciente'])[:25], fill=(50, 50, 50))
+            d.text((500, y), formatar_moeda(row['Valor Líquido']), fill=(50, 50, 50))
             y += 35
         total = df_dados['Valor Líquido'].sum()
     else:
         d.text((20, y), "PERÍODO", fill=(0, 0, 0))
-        d.text((480, y), "VALOR", fill=(0, 0, 0))
+        d.text((500, y), "VALOR", fill=(0, 0, 0))
         y += 40
         for _, row in df_dados.iterrows():
             d.text((20, y), str(row['Semana']), fill=(50, 50, 50))
-            d.text((480, y), formatar_moeda(row['Valor Líquido']), fill=(50, 50, 50))
+            d.text((500, y), formatar_moeda(row['Valor Líquido']), fill=(50, 50, 50))
             y += 35
         total = df_dados['Valor Líquido'].sum()
 
@@ -118,6 +118,14 @@ if not st.session_state.logado:
 if 'df' not in st.session_state:
     st.session_state.df = carregar_dados(st.session_state.usuario_atual)
 
+# --- CONFIGURAÇÕES DE TEMPO ---
+# Cria lista de horários de 06:00 até 21:00 (intervalos de 15 min)
+lista_horarios = []
+for h in range(6, 22):
+    for m in [0, 15, 30, 45]:
+        if h == 21 and m > 0: continue
+        lista_horarios.append(f"{h:02d}:{m:02d}")
+
 # --- LÓGICA DE COMISSÃO ---
 usuario_logado = st.session_state.usuario_atual.lower()
 comissao_padrao = 75 if usuario_logado == "brenda" else 50
@@ -142,9 +150,10 @@ for i, sem in enumerate(nomes_semanas):
             c_sug, c_data, c_hora = st.columns([2, 1, 1])
             paciente_sugerido = c_sug.selectbox("Sugestões", [""] + lista_pacientes, key=f"sel_{i}")
             data_atend = c_data.date_input("Data", value=datetime.now(), key=f"d_{i}")
-            hora_atend = c_hora.time_input("Hora", value=datetime.now().time(), key=f"h_{i}")
             
-            # Opção Meio a Meio para Brenda
+            # NOVO: Seletor de Horário Limitado (06:00 - 21:00)
+            hora_selecionada = c_hora.selectbox("Horário", lista_horarios, index=28, key=f"h_{i}") # index 28 aproxima das 13:00 como padrão
+            
             meio_a_meio = False
             if usuario_logado == "brenda":
                 meio_a_meio = st.checkbox("Atendimento Meio a Meio (50%)", key=f"check_{i}")
@@ -156,7 +165,7 @@ for i, sem in enumerate(nomes_semanas):
                     liq = valor * (comissao_final / 100)
                     novo = {
                         "Data": str(data_atend), 
-                        "Hora": hora_atend.strftime("%H:%M"),
+                        "Hora": hora_selecionada,
                         "Semana": sem, 
                         "Paciente": nome_f, 
                         "Valor Bruto": valor, 
