@@ -44,7 +44,7 @@ def carregar_dados(usuario):
     client = conectar_google_sheets()
     if client:
         try:
-            # --- MUDANÇA CRÍTICA: USA ID DIRETO (open_by_key) ---
+            # --- TENTA ABRIR PELO ID ---
             sheet = client.open_by_key(id_planilha).sheet1
             
             data = sheet.get_all_records()
@@ -53,10 +53,11 @@ def carregar_dados(usuario):
             if df.empty:
                 return pd.DataFrame(columns=["Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
             
-            # Converte números
+            # Converte números (garante que não quebre o cálculo)
             cols_num = ["Valor Bruto", "Comissão (%)", "Valor Líquido"]
             for col in cols_num:
                 if col in df.columns:
+                    # A LINHA QUE DEU ERRO ANTES É ESTA ABAIXO:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
             return df
@@ -74,9 +75,7 @@ def salvar_dados(df, usuario):
     client = conectar_google_sheets()
     if client:
         try:
-            # --- MUDANÇA CRÍTICA: USA ID DIRETO ---
             sheet = client.open_by_key(id_planilha).sheet1
-            
             sheet.clear() 
             sheet.update([df.columns.values.tolist()] + df.values.tolist())
             return True
