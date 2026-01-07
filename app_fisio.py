@@ -19,7 +19,6 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 # --- FUNÇÃO AUXILIAR DE FORMATAÇÃO DE MOEDA ---
 def formatar_moeda(valor):
-    """Transforma 60.0 em R$ 60,00"""
     return f"R$ {valor:,.2f}".replace(",", "v").replace(".", ",").replace("v", ".")
 
 # --- CONEXÃO GOOGLE SHEETS ---
@@ -81,7 +80,6 @@ def arquivar_mes_google(df, usuario):
         try:
             spreadsheet = client.open(nome_planilha)
             nome_aba = datetime.now().strftime("%m_%Y_Historico")
-            
             nova_aba = spreadsheet.add_worksheet(title=nome_aba, rows="100", cols="20")
             nova_aba.update([df.columns.values.tolist()] + df.values.tolist())
             return True
@@ -117,13 +115,20 @@ if not verificar_login():
 if 'df' not in st.session_state:
     st.session_state.df = carregar_dados(st.session_state.usuario_atual)
 
+# --- DEFINIÇÃO DE PORCENTAGEM FIXA ---
+# Se o usuário for 'brenda', 75. Caso contrário, 50.
+usuario_logado = st.session_state.usuario_atual.lower()
+comissao_fixa = 75 if usuario_logado == "brenda" else 50
+
 # --- LISTA PARA AUTOCOMPLETE ---
 lista_pacientes = sorted(st.session_state.df["Paciente"].unique().tolist()) if not st.session_state.df.empty else []
 
 # --- BARRA LATERAL ---
 with st.sidebar:
     st.info(f"👤 **{st.session_state.usuario_atual}**")
-    comissao_usuario = st.number_input("Comissão (%)", 0, 100, 75)
+    # Campo desabilitado para garantir que a porcentagem fixa seja respeitada
+    st.number_input("Sua Comissão (%)", value=comissao_fixa, disabled=True)
+    st.write("---")
     if st.button("Sair"):
         st.session_state.logado = False
         st.rerun()
@@ -136,45 +141,38 @@ abas = st.tabs(nomes_semanas + ["📊 Resumo Mensal"])
 for i, semana_nome in enumerate(nomes_semanas):
     with abas[i]:
         with st.container(border=True):
-            # Layout de entrada de dados
             c_data, c_valor = st.columns([1, 1])
             data_atend = c_data.date_input("Data do Atendimento", key=f"d_{i}")
-            
-            # ALTERAÇÃO: Step ajustado para 5.0 conforme pedido
             valor = c_valor.number_input("Valor da Sessão (R$)", min_value=0.0, step=5.0, key=f"v_{i}")
             
             st.write("---")
-            nome_digitado = st.text_input("Nome do Paciente (Novo)", key=f"input_{i}", placeholder="Digite o nome aqui...")
-            paciente_sugerido = st.selectbox("Ou escolha um paciente das sugestões:", [""] + lista_pacientes, key=f"sel_{i}")
+            nome_digitado = st.text_input("Nome do Paciente (Novo)", key=f"input_{i}")
+            paciente_sugerido = st.selectbox("Ou escolha das sugestões:", [""] + lista_pacientes, key=f"sel_{i}")
             
             nome_final = paciente_sugerido if paciente_sugerido != "" else nome_digitado
 
-            if st.button(f"Confirmar e Salvar na {semana_nome}", key=f"b_{i}", use_container_width=True):
+            if st.button(f"Confirmar na {semana_nome}", key=f"b_{i}", use_container_width=True):
                 if nome_final and valor > 0:
-                    liquido = valor * (comissao_usuario / 100)
-                    novo = {"Data": str(data_atend), "Semana": semana_nome, "Paciente": nome_final, "Valor Bruto": valor, "Comissão (%)": comissao_usuario, "Valor Líquido": liquido}
+                    liquido = valor * (comissao_fixa / 100)
+                    novo = {"Data": str(data_atend), "Semana": semana_nome, "Paciente": nome_final, "Valor Bruto": valor, "Comissão (%)": comissao_fixa, "Valor Líquido": liquido}
                     st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame([novo])], ignore_index=True)
                     salvar_dados(st.session_state.df, st.session_state.usuario_atual)
-                    st.success(f"Atendimento de {nome_final} salvo!")
-                    time.sleep(1)
+                    st.success(f"Salvo!")
+                    time.sleep(0.5)
                     st.rerun()
-                else:
-                    st.warning("Por favor, preencha o nome do paciente e o valor.")
 
         df_sem = st.session_state.df[st.session_state.df["Semana"] == semana_nome]
         if not df_sem.empty:
-            # Formatação na tabela da semana
             df_display = df_sem[["Data", "Paciente", "Valor Bruto", "Valor Líquido"]].copy()
             st.dataframe(
                 df_display.style.format({"Valor Bruto": "R$ {:,.2f}", "Valor Líquido": "R$ {:,.2f}"}), 
                 hide_index=True, 
                 use_container_width=True
             )
-            
             total_sem = df_sem['Valor Líquido'].sum()
-            st.info(f"💰 **Total a receber na semana:** {formatar_moeda(total_sem)}")
+            st.info(f"💰 **Total na semana:** {formatar_moeda(total_sem)}")
             
-            if st.button("Desfazer Último Lançamento", key=f"del_{i}"):
+            if st.button("Desfazer Último", key=f"del_{i}"):
                 st.session_state.df = st.session_state.df.drop(df_sem.index[-1])
                 salvar_dados(st.session_state.df, st.session_state.usuario_atual)
                 st.rerun()
@@ -184,30 +182,23 @@ with abas[4]:
     if not st.session_state.df.empty:
         st.subheader("📊 Consolidado Mensal")
         resumo = st.session_state.df.groupby("Semana")["Valor Líquido"].sum().reindex(nomes_semanas).fillna(0).reset_index()
-        
-        # ALTERAÇÃO: Tabela formatada em Reais (R$ 0,00)
         st.dataframe(
             resumo.style.format({"Valor Líquido": lambda x: formatar_moeda(x)}),
             hide_index=True,
             use_container_width=True
         )
-        
         total_mês = st.session_state.df["Valor Líquido"].sum()
-        # Metric formatada em Reais
         st.metric("TOTAL LÍQUIDO A RECEBER", formatar_moeda(total_mês))
 
         st.divider()
         col_res1, col_res2 = st.columns(2)
-        
-        if col_res1.button("📦 FECHAR E ARQUIVAR MÊS", use_container_width=True, type="secondary"):
+        if col_res1.button("📦 ARQUIVAR MÊS", use_container_width=True):
             if arquivar_mes_google(st.session_state.df, st.session_state.usuario_atual):
                 st.session_state.df = pd.DataFrame(columns=["Data", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
                 salvar_dados(st.session_state.df, st.session_state.usuario_atual)
-                st.success("Dados movidos para o histórico e painel resetado!")
-                time.sleep(2)
                 st.rerun()
         
-        if col_res2.button("🔴 APAGAR MÊS ATUAL", use_container_width=True, type="primary"):
+        if col_res2.button("🔴 APAGAR MÊS", use_container_width=True, type="primary"):
             st.session_state.df = pd.DataFrame(columns=["Data", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
             salvar_dados(st.session_state.df, st.session_state.usuario_atual)
             st.rerun()
