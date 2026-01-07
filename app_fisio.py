@@ -76,7 +76,7 @@ def gerar_imagem_jpeg(df_dados, titulo, usuario, tipo="semanal"):
         d.text((330, y), "PACIENTE", fill=(0, 0, 0))
         d.text((600, y), "VALOR", fill=(0, 0, 0))
         y += 40
-        for _, row in df_dados.iterrows():
+        for _, row in df_dados.sort_values(by=["Data", "Hora"]).iterrows():
             d.text((20, y), str(row['Data']), fill=(50, 50, 50))
             d.text((120, y), str(row.get('Dia_Semana', ''))[:3], fill=(50, 50, 50))
             d.text((230, y), str(row.get('Hora', '')), fill=(50, 50, 50))
@@ -123,13 +123,16 @@ lista_pacientes = sorted(st.session_state.df["Paciente"].unique().tolist()) if n
 lista_horarios = [f"{h:02d}:{m:02d}" for h in range(6, 22) for m in [0, 15, 30, 45] if not (h == 21 and m > 0)]
 dias_ptbr = {"Monday": "Segunda", "Tuesday": "Terça", "Wednesday": "Quarta", "Thursday": "Quinta", "Friday": "Sexta", "Saturday": "Sábado", "Sunday": "Domingo"}
 
-# --- ABAS ---
+# --- TELA PRINCIPAL ---
+st.markdown(f"<h3 style='text-align: center;'>🩺 Olá, {st.session_state.usuario_atual}</h3>", unsafe_allow_html=True)
+
 nomes_semanas = ["Semana 1", "Semana 2", "Semana 3", "Semana 4"]
 labels = [f"{s} ({formatar_moeda(st.session_state.df[st.session_state.df['Semana']==s]['Valor Líquido'].sum())})" for s in nomes_semanas]
 abas = st.tabs(labels + ["📊 Resumo Mensal"])
 
 for i, sem in enumerate(nomes_semanas):
     with abas[i]:
+        # Form de Cadastro
         with st.container(border=True):
             c1, c2 = st.columns([2, 1])
             nome_digitado = c1.text_input("Paciente", key=f"in_{i}")
@@ -154,25 +157,50 @@ for i, sem in enumerate(nomes_semanas):
                     salvar_dados(st.session_state.df, st.session_state.usuario_atual)
                     st.rerun()
 
-        # Visualização por Dia
-        df_sem = st.session_state.df[st.session_state.df["Semana"] == sem]
+        # --- NOVA VISUALIZAÇÃO AGRUPADA ---
+        df_sem = st.session_state.df[st.session_state.df["Semana"] == sem].sort_values(by=["Data", "Hora"])
+        
         if not df_sem.empty:
-            st.write("### 📅 Atendimentos da Semana")
-            for dia in ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]:
+            st.markdown("---")
+            st.subheader("📅 Cronograma da Semana")
+            
+            # Percorre os dias da semana para criar os blocos
+            ordem_dias = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
+            for dia in ordem_dias:
                 df_dia = df_sem[df_sem["Dia_Semana"] == dia]
                 if not df_dia.empty:
-                    with st.expander(f"📌 {dia} - {formatar_moeda(df_dia['Valor Líquido'].sum())}"):
-                        st.table(df_dia[["Hora", "Paciente", "Valor Líquido"]])
+                    # Cria um expander para cada dia que tem atendimento
+                    with st.expander(f"📌 {dia} - {formatar_moeda(df_dia['Valor Líquido'].sum())}", expanded=True):
+                        st.dataframe(
+                            df_dia[["Hora", "Paciente", "Valor Líquido"]], 
+                            hide_index=True, 
+                            use_container_width=True
+                        )
             
-            st.divider()
+            st.markdown("---")
+            # Botão de Imagem
             img_sem = gerar_imagem_jpeg(df_sem, f"Resumo {sem}", st.session_state.usuario_atual, "semanal")
             st.download_button(f"📸 Baixar Imagem {sem}", img_sem, f"Resumo_{sem}.jpg", "image/jpeg", use_container_width=True)
+            
+            # Botão Desfazer
+            if st.button(f"🗑️ Desfazer Último ({sem})", key=f"undo_{i}"):
+                st.session_state.df = st.session_state.df.drop(df_sem.index[-1])
+                salvar_dados(st.session_state.df, st.session_state.usuario_atual)
+                st.rerun()
 
 # --- RESUMO MENSAL ---
 with abas[4]:
     if not st.session_state.df.empty:
+        st.subheader("📊 Consolidado Mensal")
         res = st.session_state.df.groupby("Semana")["Valor Líquido"].sum().reindex(nomes_semanas).fillna(0).reset_index()
         st.dataframe(res.style.format({"Valor Líquido": lambda x: formatar_moeda(x)}), use_container_width=True, hide_index=True)
         st.metric("TOTAL MÊS", formatar_moeda(st.session_state.df["Valor Líquido"].sum()))
+        
         img_mes = gerar_imagem_jpeg(res, "Resumo Mensal", st.session_state.usuario_atual, "mensal")
-        st.download_button("📸 Baixar Imagem Mensal", img_mes, "Resumo_Mensal.jpg", "image/jpeg", use_container_width=True)
+        st.download_button("📸 Baixar Imagem Resumo Mensal", img_mes, "Resumo_Mensal.jpg", "image/jpeg", use_container_width=True)
+        
+        st.divider()
+        if st.button("🔴 APAGAR TUDO (NOVO MÊS)", use_container_width=True, type="primary"):
+            st.session_state.df = pd.DataFrame(columns=["Data", "Dia_Semana", "Hora", "Semana", "Paciente", "Valor Bruto", "Comissão (%)", "Valor Líquido"])
+            salvar_dados(st.session_state.df, st.session_state.usuario_atual)
+            st.rerun()
